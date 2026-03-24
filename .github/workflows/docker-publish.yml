@@ -1,9 +1,11 @@
 name: Publish Fork to GHCR
 
+# Push to ghcr.io/<owner>/iplayarr:<sanitized-branch> on each push (slashes → hyphens in tag).
 on:
   push:
     branches:
-      - 'fix/native-search-series-expansion-build'
+      - main
+      - 'fix/**'
   workflow_dispatch:
 
 jobs:
