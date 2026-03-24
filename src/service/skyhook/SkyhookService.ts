@@ -2,6 +2,49 @@ import axios from 'axios';
 
 import RedisCacheService from '../redis/redisCacheService';
 
+/** Minimum token-overlap score (0–1) to accept a non-exact TVDB episode title match. */
+const MIN_EPISODE_TITLE_SIMILARITY = 0.35;
+
+const TITLE_STOP_WORDS = new Set([
+    'a', 'an', 'and', 'the', 'episode', 'part', 'special', 'show', 'bbc', '1', '2', '3', '4', '5',
+]);
+
+function normalizeForTokens(value: string): string {
+    return value
+        .toLowerCase()
+        .replace(/&/g, ' and ')
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim()
+        .replace(/\s+/g, ' ');
+}
+
+function titleTokens(value: string): Set<string> {
+    return new Set(
+        normalizeForTokens(value)
+            .split(' ')
+            .filter((t) => t.length > 1 && !TITLE_STOP_WORDS.has(t))
+    );
+}
+
+/**
+ * Token-overlap similarity between iPlayer / release text and a TVDB episode title.
+ * Same idea as Sonarr-style fuzzy episode matching in *arr stacks.
+ */
+export function episodeTitleSimilarity(a: string, b: string): number {
+    const ta = titleTokens(a);
+    const tb = titleTokens(b);
+    if (!ta.size || !tb.size) {
+        return 0;
+    }
+    let overlap = 0;
+    for (const t of ta) {
+        if (tb.has(t)) {
+            overlap += 1;
+        }
+    }
+    return overlap / Math.max(ta.size, tb.size);
+}
+
 class SkyhookService {
     skyhookSeriesCache: RedisCacheService<{ tvdbId: string }[]>
     skyhookEpisodeCache: RedisCacheService<{ episodes: any[] } | undefined>
@@ -64,8 +107,39 @@ class SkyhookService {
             }
         }
 
-        const episode = data?.episodes.find((ep: any) => ep.title?.toLowerCase() === episodeName?.toLowerCase());
-        return episode;
+        const episodes: any[] = data?.episodes ?? [];
+
+        const exact = episodes.find((ep: any) => ep.title?.toLowerCase() === episodeName?.toLowerCase());
+        if (exact) {
+            return {
+                title: exact.title,
+                seasonNumber: exact.seasonNumber,
+                episodeNumber: exact.episodeNumber,
+            };
+        }
+
+        let best: { title: string; seasonNumber: number; episodeNumber: number } | undefined;
+        let bestScore = 0;
+        for (const ep of episodes) {
+            const tvdbTitle = ep.title ?? '';
+            const s1 = episodeTitleSimilarity(episodeName, tvdbTitle);
+            const strippedTvdb = tvdbTitle.replace(/^episode\s*\d+\s*[-–:]\s*/i, '');
+            const s2 = strippedTvdb !== tvdbTitle ? episodeTitleSimilarity(episodeName, strippedTvdb) : 0;
+            const score = Math.max(s1, s2);
+            if (score > bestScore) {
+                bestScore = score;
+                best = {
+                    title: tvdbTitle,
+                    seasonNumber: ep.seasonNumber,
+                    episodeNumber: ep.episodeNumber,
+                };
+            }
+        }
+
+        if (best && bestScore >= MIN_EPISODE_TITLE_SIMILARITY) {
+            return best;
+        }
+        return undefined;
     }
 }
 

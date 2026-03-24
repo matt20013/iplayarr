@@ -3,6 +3,14 @@ import { spawn } from 'child_process';
 import { IPlayerSearchResult } from '../../types/IPlayerSearchResult';
 import { Synonym } from '../../types/Synonym';
 import { getQualityProfile } from '../../utils/Utils';
+
+function parseQueryInt(value: number | string | undefined): number | undefined {
+    if (value === undefined || value === '') {
+        return undefined;
+    }
+    const n = Number(value);
+    return Number.isFinite(n) ? n : undefined;
+}
 import episodeCacheService from '../episodeCacheService';
 import getIplayerExecutableService from '../getIplayerExecutableService';
 import loggingService from '../loggingService';
@@ -45,13 +53,25 @@ class GetIplayerSearchService implements AbstractSearchService {
         });
     }
 
-    async processCompletedSearch(results: IPlayerSearchResult[], inputTerm: string, _synonym?: Synonym, season?: number, episode?: number): Promise<IPlayerSearchResult[]> {
+    async processCompletedSearch(
+        results: IPlayerSearchResult[],
+        inputTerm: string,
+        _synonym?: Synonym,
+        season?: number | string,
+        episode?: number | string
+    ): Promise<IPlayerSearchResult[]> {
         const episodeCache: IPlayerSearchResult[] = await episodeCacheService.searchEpisodeCache(inputTerm);
+        const seasonNum = parseQueryInt(season);
+        const episodeNum = parseQueryInt(episode);
         for (const cachedEpisode of episodeCache) {
             if (cachedEpisode) {
                 const exists = results.some(({ pid }) => pid == cachedEpisode.pid);
-                const validSeason = season ? cachedEpisode.series == season : true;
-                const validEpisode = episode ? cachedEpisode.episode == episode : true;
+                const validSeason =
+                    seasonNum === undefined ||
+                    cachedEpisode.series == seasonNum ||
+                    (seasonNum === 1 && cachedEpisode.series === 0);
+                const validEpisode =
+                    episodeNum === undefined || cachedEpisode.episode == episodeNum;
                 if (!exists && validSeason && validEpisode) {
                     results.push({
                         ...cachedEpisode,

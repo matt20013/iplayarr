@@ -174,8 +174,12 @@ export async function calculateSeasonAndEpisode(
                 : programme.title
             : undefined;
 
-    // Lookup specials/unresolved episodes via Skyhook
-    if ((isSpecial || series === 0) && episode === 0 && episodeTitle) {
+    // Lookup via Sonarr Skyhook when iPlayer uses season 0 (any episode — fixes S00E01+ vs TVDB S01E01+)
+    // or legacy specials with episode 0.
+    const shouldLookupSkyhook =
+        episodeTitle &&
+        (series === 0 || (isSpecial && episode === 0));
+    if (shouldLookupSkyhook) {
         const seriesTitle = programme.display_title?.title ?? programme.title;
         const skyhookResult = await SkyhookService.lookupSeriesDetails(seriesTitle, episodeTitle);
         if (skyhookResult) {
