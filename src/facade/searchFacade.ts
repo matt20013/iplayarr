@@ -7,6 +7,10 @@ import synonymService from '../service/synonymService';
 import { IplayarrParameter } from '../types/IplayarrParameters';
 import { IPlayerSearchResult } from '../types/IPlayerSearchResult';
 import { Synonym } from '../types/Synonym';
+import {
+    isMiniseriesOverrideQuery,
+    patchMiniseriesReleaseName,
+} from '../utils/miniseriesReleaseInterceptor';
 import { createNZBName, removeLastFourDigitNumber } from '../utils/Utils';
 import { titlesLikelySameShow } from '../utils/showTitleMatch';
 import scheduleFacade from './scheduleFacade';
@@ -47,6 +51,7 @@ class SearchFacade {
         }
 
         const filteredResults = this.#filterForSeasonAndEpisode(
+            inputTerm,
             term,
             results as IPlayerSearchResult[],
             season,
@@ -55,9 +60,11 @@ class SearchFacade {
 
         const processedResults: IPlayerSearchResult[] = await service.processCompletedSearch(filteredResults, inputTerm, synonym, season, episode);
 
-        const remapped = await this.#remapMiniseriesTvdbSeason1(term, processedResults, season, episode, synonym);
+        const remapped = await this.#remapMiniseriesTvdbSeason1(inputTerm, term, processedResults, season, episode, synonym);
 
-        return remapped.filter(({ pubDate }) => !pubDate || pubDate < new Date());
+        const intercepted = this.#applyMiniseriesReleaseInterceptor(inputTerm, term, remapped);
+
+        return intercepted.filter(({ pubDate }) => !pubDate || pubDate < new Date());
     }
 
     async #getService(): Promise<AbstractSearchService> {
@@ -79,6 +86,7 @@ class SearchFacade {
      * When Sonarr searches S01Exx, also accept S00Exx for the same show (title-guarded).
      */
     #filterForSeasonAndEpisode(
+        sonarrQuery: string,
         searchTerm: string,
         results: IPlayerSearchResult[],
         season?: number | string,
@@ -96,18 +104,21 @@ class SearchFacade {
             const strictEp = e === undefined || result.episode == e;
             const strict = strictSeason && strictEp;
 
+            const allowlisted =
+                isMiniseriesOverrideQuery(sonarrQuery) || isMiniseriesOverrideQuery(searchTerm);
             const miniseriesBridge =
                 s === 1 &&
                 result.series === 0 &&
                 result.episode != null &&
                 (e === undefined || result.episode === e) &&
-                titlesLikelySameShow(result.title, searchTerm);
+                (titlesLikelySameShow(result.title, searchTerm) || allowlisted);
 
             return strict || miniseriesBridge;
         });
     }
 
     async #remapMiniseriesTvdbSeason1(
+        sonarrQuery: string,
         searchTerm: string,
         results: IPlayerSearchResult[],
         season?: number | string,
@@ -116,7 +127,10 @@ class SearchFacade {
     ): Promise<IPlayerSearchResult[]> {
         const s = parseQueryInt(season);
         const e = parseQueryInt(episode);
-        if (s !== 1) {
+        const allowlisted =
+            isMiniseriesOverrideQuery(sonarrQuery) || isMiniseriesOverrideQuery(searchTerm);
+
+        if (s !== 1 && !allowlisted) {
             return results;
         }
 
@@ -128,7 +142,9 @@ class SearchFacade {
                 if (e !== undefined && r.episode !== e) {
                     return r;
                 }
-                if (!titlesLikelySameShow(r.title, searchTerm)) {
+                const sonarrWantsTvdbS1 = s === 1 && (allowlisted || titlesLikelySameShow(r.title, searchTerm));
+                const allowlistBroadSearch = allowlisted && s === undefined;
+                if (!sonarrWantsTvdbS1 && !allowlistBroadSearch) {
                     return r;
                 }
                 const remapped: IPlayerSearchResult = { ...r, series: 1 };
@@ -136,6 +152,34 @@ class SearchFacade {
                 return remapped;
             })
         );
+    }
+
+    /**
+     * Regex interceptor (Python proxy parity): for allowlisted queries only, patch **S00E** → **S01E** in NZB title.
+     * Leaves normal shows untouched.
+     */
+    #applyMiniseriesReleaseInterceptor(
+        sonarrQuery: string,
+        searchTerm: string,
+        results: IPlayerSearchResult[]
+    ): IPlayerSearchResult[] {
+        if (!isMiniseriesOverrideQuery(sonarrQuery) && !isMiniseriesOverrideQuery(searchTerm)) {
+            return results;
+        }
+        return results.map((r) => {
+            if (!r.nzbName || !/S00E\d{2}/i.test(r.nzbName)) {
+                return r;
+            }
+            const nzbName = patchMiniseriesReleaseName(r.nzbName);
+            if (nzbName === r.nzbName) {
+                return r;
+            }
+            const out: IPlayerSearchResult = { ...r, nzbName };
+            if (out.series === 0) {
+                out.series = 1;
+            }
+            return out;
+        });
     }
 
     removeFromSearchCache(term: string) {
