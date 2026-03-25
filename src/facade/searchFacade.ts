@@ -100,9 +100,11 @@ class SearchFacade {
         }
 
         return results.filter((result) => {
+            const titleOk =
+                titlesLikelySameShow(result.title, searchTerm) || titlesLikelySameShow(result.title, sonarrQuery);
             const strictSeason = s === undefined || result.series == s;
             const strictEp = e === undefined || result.episode == e;
-            const strict = strictSeason && strictEp;
+            const strict = strictSeason && strictEp && titleOk;
 
             const allowlisted =
                 isMiniseriesOverrideQuery(sonarrQuery) || isMiniseriesOverrideQuery(searchTerm);
@@ -111,7 +113,7 @@ class SearchFacade {
                 result.series === 0 &&
                 result.episode != null &&
                 (e === undefined || result.episode === e) &&
-                (titlesLikelySameShow(result.title, searchTerm) || allowlisted);
+                (titleOk || allowlisted);
 
             return strict || miniseriesBridge;
         });

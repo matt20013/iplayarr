@@ -37,6 +37,32 @@ describe('TVDB miniseries bridge (S00 → S01 for Sonarr)', () => {
         size: 2000,
         pubDate: new Date('1982-09-20T12:00:00Z'),
     };
+    const noisyStrictMatches = [
+        {
+            ...smileyUpstreamRow,
+            pid: 'm000normal01',
+            title: 'Normal People',
+            series: 1,
+            episode: 1,
+            nzbName: 'Normal.People.S01E01.Episode.1.WEBDL.1080p-BBC',
+        },
+        {
+            ...smileyUpstreamRow,
+            pid: 'm000beautiful01',
+            title: 'Beautiful People',
+            series: 1,
+            episode: 1,
+            nzbName: 'Beautiful.People.S01E01.How.I.Got.My.Vase.WEBDL.1080p-BBC',
+        },
+        {
+            ...smileyUpstreamRow,
+            pid: 'm000peoplejust01',
+            title: 'People Just Do Nothing',
+            series: 1,
+            episode: 1,
+            nzbName: 'People.Just.Do.Nothing.S01E01.Secret.Location.WEBDL.1080p-BBC',
+        },
+    ];
 
     beforeEach(() => {
         jest.clearAllMocks();
@@ -65,6 +91,16 @@ describe('TVDB miniseries bridge (S00 → S01 for Sonarr)', () => {
         expect(results[0].nzbName).toMatch(/S01E01/i);
         expect(results[0].nzbName).not.toMatch(/S00E01/i);
         expect(results[0].pid).toBe('m000smiley01');
+    });
+
+    it("searchFacade: filters relaxed 'People' search noise to only Smiley's People for S01E01 query", async () => {
+        (nativeSearchService.search as jest.Mock).mockResolvedValue([smileyUpstreamRow, ...noisyStrictMatches]);
+
+        const results = await searchFacade.search("Smiley's People", 1, 1);
+
+        expect(results).toHaveLength(1);
+        expect(results[0].pid).toBe('m000smiley01');
+        expect(results[0].nzbName).toMatch(/Smileys\.People\.S01E01/i);
     });
 
     it('SearchEndpoint: Torznab item title uses remapped S01E01 NZB name for Smiley miniseries', async () => {
