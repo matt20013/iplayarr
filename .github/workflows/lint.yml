@@ -4,6 +4,7 @@ on:
     push:
         branches:
             - main
+            - native-search-series-expansion-ci-tests
     pull_request:
         branches:
             - main
